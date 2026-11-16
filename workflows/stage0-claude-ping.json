@@ -1,0 +1,60 @@
+{
+  "name": "Stage 0 - Claude Ping",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "b2e1d7ef-0000-4000-8000-000000000001",
+      "name": "Run Test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "anthropic-beta", "value": "server-side-fallback-2026-07-01" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"model\": \"claude-opus-5-5\",\n  \"max_tokens\": 1024,\n  \"output_config\": { \"effort\": \"low\" },\n  \"fallbacks\": \"default\",\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"Reply with exactly the word: pong\" }\n  ]\n}",
+        "options": {
+          "timeout": 120000,
+          "response": { "response": { "neverError": true, "fullResponse": true } }
+        }
+      },
+      "id": "b2e1d7ef-0000-4000-8000-000000000002",
+      "name": "Claude Messages API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [260, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst body = res.body ?? {};\n\nif (res.statusCode !== 200) {\n  return [{ json: { ok: false, status: res.statusCode, error: body.error ?? body } }];\n}\nif (body.stop_reason === 'refusal') {\n  return [{ json: { ok: false, status: 200, stop_reason: 'refusal', stop_details: body.stop_details } }];\n}\n\nconst text = (body.content ?? [])\n  .filter(b => b.type === 'text')\n  .map(b => b.text)\n  .join('')\n  .trim();\n\nreturn [{ json: {\n  ok: text.toLowerCase().includes('pong'),\n  reply: text,\n  model: body.model,\n  stop_reason: body.stop_reason,\n  usage: body.usage,\n} }];"
+      },
+      "id": "b2e1d7ef-0000-4000-8000-000000000003",
+      "name": "Check Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 0]
+    }
+  ],
+  "connections": {
+    "Run Test": {
+      "main": [[{ "node": "Claude Messages API", "type": "main", "index": 0 }]]
+    },
+    "Claude Messages API": {
+      "main": [[{ "node": "Check Reply", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

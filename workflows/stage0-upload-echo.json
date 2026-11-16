@@ -1,0 +1,43 @@
+{
+  "name": "Stage 0 - Upload Echo",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "mode": "hostedChat",
+        "authentication": "none",
+        "initialMessages": "Stage 0 test: attach a CSV, XLSX, PDF or TXT file and type a question.",
+        "options": {
+          "allowFileUploads": true,
+          "allowedFilesMimeTypes": "text/csv,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel",
+          "responseMode": "lastNode",
+          "title": "Data Agent - Stage 0",
+          "subtitle": "Upload echo test"
+        }
+      },
+      "id": "a1f0c6de-0000-4000-8000-000000000001",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.5,
+      "position": [0, 0],
+      "webhookId": "5f3b9c2e-7d41-4a8e-9b0a-1c2d3e4f5a01"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst files = item.json.files ?? [];\nconst binary = item.binary ?? {};\n\nconst lines = files.map((f, i) => {\n  const b = binary[f.binaryKey] ?? {};\n  return `${i + 1}. **${f.fileName}** | type: ${f.mimeType} | size: ${f.fileSize} | binary key: \\`${f.binaryKey}\\` | stored as: ${b.id ? 'filesystem' : 'inline'}`;\n});\n\nconst output = [\n  `**Question:** ${item.json.chatInput || '(none)'}`,\n  `**Session:** ${item.json.sessionId}`,\n  files.length ? `**Files received:**\\n${lines.join('\\n')}` : 'No files attached.',\n].join('\\n\\n');\n\nreturn [{ json: { output } }];"
+      },
+      "id": "a1f0c6de-0000-4000-8000-000000000002",
+      "name": "Describe Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 0]
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [[{ "node": "Describe Upload", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

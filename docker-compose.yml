@@ -1,0 +1,32 @@
+name: data-agent
+
+services:
+  analysis:
+    build:
+      context: ./analysis-service
+      target: runtime
+    image: data-agent-analysis:0.2.0
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"   # n8n runs on the host; nothing else can reach it
+    volumes:
+      - analysis-data:/data
+    mem_limit: 2g
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.34.4
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+      # Host CA bundle, so model downloads work behind the TLS-inspecting proxy.
+      - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
+      # Model files downloaded from Hugging Face (the Ollama registry's storage is blocked here).
+      - ./models:/models:ro
+    restart: unless-stopped
+
+volumes:
+  analysis-data:
+  ollama:
+    name: ollama

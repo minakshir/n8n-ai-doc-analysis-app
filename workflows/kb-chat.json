@@ -1,0 +1,362 @@
+{
+  "id": "dataAgentKbChat01",
+  "name": "Knowledge Base - Chat",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "mode": "hostedChat",
+        "authentication": "none",
+        "initialMessages": "Ask a question about the documents in the knowledge base, or attach TXT / PDF files to add them.",
+        "options": {
+          "allowFileUploads": true,
+          "allowedFilesMimeTypes": "text/plain,application/pdf",
+          "responseMode": "lastNode",
+          "title": "Data Agent - Knowledge Base",
+          "subtitle": "Answers cite the document and page they come from"
+        }
+      },
+      "id": "e7b4a0c2-0000-4000-8000-000000000001",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "9d2e3f4a-5b6c-4d7e-8f90-3c4d5e6f7a03"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e7b4a0c2-0000-4000-8000-0000000000c1",
+              "leftValue": "={{ ($json.files ?? []).length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e7b4a0c2-0000-4000-8000-000000000002",
+      "name": "Has Files?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per uploaded file, each carrying its binary under the key 'file'.\nconst item = $input.first();\nreturn (item.json.files ?? []).map(f => ({\n  json: { file_name: f.fileName },\n  binary: { file: item.binary[f.binaryKey] },\n}));"
+      },
+      "id": "e7b4a0c2-0000-4000-8000-000000000003",
+      "name": "Split Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/kb/documents",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "file"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 900000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "e7b4a0c2-0000-4000-8000-000000000004",
+      "name": "Add Document",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        660,
+        -160
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const files = $('Split Files').all();\nconst parts = $input.all().map((item, i) => {\n  const name = files[i]?.json.file_name ?? `file ${i + 1}`;\n  const res = item.json;\n  if (res.error && res.statusCode === undefined) {\n    return `**${name}**: Error: analysis service unreachable (${res.error.message ?? res.error}).`;\n  }\n  const body = res.body ?? {};\n  if (res.statusCode !== 200) {\n    const e = body.error ?? {};\n    return `**${name}**: Error ${e.code ?? res.statusCode}: ${e.message ?? 'request failed'}${e.hint ? ` (${e.hint})` : ''}`;\n  }\n  const lines = [`**${name}** added as \\`${body.doc_id}\\`: ${body.chunks} passages${body.pages ? ` from ${body.pages} pages` : ''}.`];\n  for (const w of body.warnings ?? []) lines.push(`- Warning: ${w}`);\n  return lines.join('\\n');\n});\nreturn [{ json: { output: parts.join('\\n\\n') } }];"
+      },
+      "id": "e7b4a0c2-0000-4000-8000-000000000005",
+      "name": "Format Add Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/kb/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: $json.chatInput, top_k: 5 }) }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "e7b4a0c2-0000-4000-8000-000000000006",
+      "name": "Search KB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        120
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turns search results into an Ollama chat request, or a direct reply when there is nothing to ask.\nconst res = $input.first().json;\nconst question = ($('Chat Trigger').first().json.chatInput ?? '').trim();\nif (res.error && res.statusCode === undefined) {\n  return [{ json: { ask: false, output: `Error: analysis service unreachable (${res.error.message ?? res.error}).` } }];\n}\nconst body = res.body ?? {};\nif (res.statusCode !== 200) {\n  const e = body.error ?? {};\n  return [{ json: { ask: false, output: `Error ${e.code ?? res.statusCode}: ${e.message ?? 'search failed'}${e.hint ? ` (${e.hint})` : ''}` } }];\n}\nconst sources = body.results ?? [];\nconst notes = (body.warnings ?? []).map(w => `\\n\\n_Note: ${w}_`).join('');\nif (!sources.length) {\n  return [{ json: { ask: false, output: 'The knowledge base is empty. Attach TXT or PDF documents to add them.' + notes } }];\n}\nconst context = sources.map((s, i) =>\n  `[${i + 1}] ${s.file_name}${s.page ? `, page ${s.page}` : ''}\\n${s.text}`).join('\\n\\n');\nconst request = {\n  model: 'qwen2.5:3b',\n  stream: false,\n  options: { temperature: 0 },\n  format: {\n    type: 'object',\n    properties: {\n      answer: { type: 'string' },\n      sources: { type: 'array', items: { type: 'integer' } },\n    },\n    required: ['answer', 'sources'],\n  },\n  messages: [\n    {\n      role: 'system',\n      content: 'You answer questions using only the numbered sources provided. ' +\n        'Never use outside knowledge and never guess. ' +\n        'If the sources do not contain the answer, set answer to \"I could not find this in the knowledge base.\" and sources to []. ' +\n        'Otherwise answer concisely, quote figures exactly as written, and list in sources the numbers of every source you used.',\n    },\n    { role: 'user', content: `Sources:\\n\\n${context}\\n\\nQuestion: ${question}` },\n  ],\n};\nreturn [{ json: { ask: true, request, sources, notes } }];"
+      },
+      "id": "e7b4a0c2-0000-4000-8000-000000000007",
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e7b4a0c2-0000-4000-8000-0000000000c2",
+              "leftValue": "={{ $json.ask }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e7b4a0c2-0000-4000-8000-000000000008",
+      "name": "Ask LLM?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "e7b4a0c2-0000-4000-8000-000000000009",
+      "name": "Ollama Answer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1100,
+        40
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $('Build Prompt').first().json;\nconst res = $input.first().json;\nif (res.statusCode !== 200) {\n  const detail = res.body?.error ?? res.error?.message ?? res.statusCode;\n  return [{ json: { output: `Error: the language model call failed (${typeof detail === 'string' ? detail : JSON.stringify(detail)}).` } }];\n}\nlet out;\ntry {\n  out = JSON.parse(res.body.message.content);\n} catch {\n  return [{ json: { output: 'Error: the language model returned an unreadable answer.' } }];\n}\nconst cited = [...new Set((out.sources ?? []).filter(n => Number.isInteger(n) && n >= 1 && n <= prep.sources.length))];\nlet text = String(out.answer ?? '').trim();\nif (cited.length) {\n  text += '\\n\\n**Sources**\\n' + cited.map(n => {\n    const s = prep.sources[n - 1];\n    return `- [${n}] ${s.file_name}${s.page ? `, page ${s.page}` : ''}`;\n  }).join('\\n');\n} else if (!/could not find/i.test(text)) {\n  text += '\\n\\n_The model cited no source for this answer; treat it as unverified._';\n}\nreturn [{ json: { output: text + prep.notes } }];"
+      },
+      "id": "e7b4a0c2-0000-4000-8000-000000000010",
+      "name": "Format Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { output: $json.output } }];"
+      },
+      "id": "e7b4a0c2-0000-4000-8000-000000000011",
+      "name": "Direct Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Has Files?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Files?": {
+      "main": [
+        [
+          {
+            "node": "Split Files",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Search KB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Files": {
+      "main": [
+        [
+          {
+            "node": "Add Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Document": {
+      "main": [
+        [
+          {
+            "node": "Format Add Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search KB": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt": {
+      "main": [
+        [
+          {
+            "node": "Ask LLM?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask LLM?": {
+      "main": [
+        [
+          {
+            "node": "Ollama Answer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Direct Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Answer": {
+      "main": [
+        [
+          {
+            "node": "Format Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

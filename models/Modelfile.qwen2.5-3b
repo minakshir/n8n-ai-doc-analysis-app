@@ -1,0 +1,3 @@
+FROM /models/qwen2.5-3b-instruct-q4_k_m.gguf
+PARAMETER num_ctx 8192
+PARAMETER temperature 0

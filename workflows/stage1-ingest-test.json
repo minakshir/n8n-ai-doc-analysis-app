@@ -1,0 +1,200 @@
+{
+  "id": "dataAgentStg1Ing",
+  "name": "Stage 1 - Ingest Test",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "mode": "hostedChat",
+        "authentication": "none",
+        "initialMessages": "Stage 1 test: attach CSV, XLSX, PDF or TXT files. I will show how each one was read.",
+        "options": {
+          "allowFileUploads": true,
+          "allowedFilesMimeTypes": "text/csv,text/plain,text/tab-separated-values,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12",
+          "responseMode": "lastNode",
+          "title": "Data Agent - Stage 1",
+          "subtitle": "File ingestion and profiling"
+        }
+      },
+      "id": "d4a3f9b1-0000-4000-8000-000000000001",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "8c1d2e3f-4a5b-4c6d-9e7f-2b3c4d5e6f02"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d4a3f9b1-0000-4000-8000-0000000000c1",
+              "leftValue": "={{ ($json.files ?? []).length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d4a3f9b1-0000-4000-8000-000000000002",
+      "name": "Has Files?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per uploaded file, each carrying its binary under the key 'file'.\nconst item = $input.first();\nreturn (item.json.files ?? []).map(f => ({\n  json: { session_id: item.json.sessionId, file_name: f.fileName },\n  binary: { file: item.binary[f.binaryKey] },\n}));"
+      },
+      "id": "d4a3f9b1-0000-4000-8000-000000000003",
+      "name": "Split Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/ingest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "file"
+            },
+            {
+              "name": "session_id",
+              "value": "={{ $json.session_id }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "d4a3f9b1-0000-4000-8000-000000000004",
+      "name": "Ingest File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        660,
+        -100
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const files = $('Split Files').all();\nconst parts = $input.all().map((item, i) => {\n  const name = files[i]?.json.file_name ?? `file ${i + 1}`;\n  const res = item.json;\n  if (res.error && res.statusCode === undefined) {\n    return `**${name}**: Error: analysis service unreachable (${res.error.message ?? res.error}).`;\n  }\n  const body = res.body ?? {};\n  if (res.statusCode !== 200) {\n    const e = body.error ?? {};\n    return `**${name}**: Error ${e.code ?? res.statusCode}: ${e.message ?? 'request failed'}${e.hint ? ` (${e.hint})` : ''}`;\n  }\n  const lines = [`**${name}** -> \\`${body.dataset_id}\\` (${body.kind})`];\n  for (const t of body.tables ?? []) {\n    lines.push(`- Table *${t.name}*: ${t.rows} rows x ${t.columns} cols, ${t.duplicate_rows} duplicate rows, ${t.missing_pct}% cells missing`);\n    lines.push(`  - Columns: ${t.column_profiles.map(c => `${c.name} [${c.type}]`).join(', ')}`);\n    for (const n of t.notes ?? []) lines.push(`  - Note: ${n}`);\n  }\n  if (body.text) {\n    lines.push(`- Text: ${body.text.words} words${body.text.pages ? `, ${body.text.pages} pages` : ''}`);\n  }\n  for (const w of body.warnings ?? []) lines.push(`- Warning: ${w}`);\n  return lines.join('\\n');\n});\nreturn [{ json: { output: parts.join('\\n\\n') } }];"
+      },
+      "id": "d4a3f9b1-0000-4000-8000-000000000005",
+      "name": "Format Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { output: 'Please attach at least one CSV, XLSX, PDF or TXT file.' } }];"
+      },
+      "id": "d4a3f9b1-0000-4000-8000-000000000006",
+      "name": "No File Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Has Files?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Files?": {
+      "main": [
+        [
+          {
+            "node": "Split Files",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No File Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Files": {
+      "main": [
+        [
+          {
+            "node": "Ingest File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ingest File": {
+      "main": [
+        [
+          {
+            "node": "Format Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

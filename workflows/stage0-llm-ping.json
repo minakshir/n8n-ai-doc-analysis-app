@@ -1,0 +1,84 @@
+{
+  "id": "dataAgentStg0Llm",
+  "name": "Stage 0 - Local LLM Ping",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "c3f2e8a0-0000-4000-8000-000000000001",
+      "name": "Run Test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"model\": \"qwen2.5:3b\",\n  \"stream\": false,\n  \"options\": { \"temperature\": 0 },\n  \"format\": {\n    \"type\": \"object\",\n    \"properties\": { \"reply\": { \"type\": \"string\" } },\n    \"required\": [\"reply\"]\n  },\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"Return JSON whose reply field is exactly the word pong.\" }\n  ]\n}",
+        "options": {
+          "timeout": 180000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "c3f2e8a0-0000-4000-8000-000000000002",
+      "name": "Ollama Chat API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.first().json;\nconst body = res.body ?? {};\n\nif (res.statusCode !== 200) {\n  return [{ json: { ok: false, status: res.statusCode, error: body.error ?? body } }];\n}\n\nlet parsed;\ntry {\n  parsed = JSON.parse(body.message?.content ?? '');\n} catch (e) {\n  return [{ json: { ok: false, error: 'Model did not return valid JSON', raw: body.message?.content } }];\n}\n\nreturn [{ json: {\n  ok: String(parsed.reply).toLowerCase().includes('pong'),\n  reply: parsed.reply,\n  model: body.model,\n  seconds: Math.round((body.total_duration ?? 0) / 1e8) / 10,\n} }];"
+      },
+      "id": "c3f2e8a0-0000-4000-8000-000000000003",
+      "name": "Check Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Run Test": {
+      "main": [
+        [
+          {
+            "node": "Ollama Chat API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat API": {
+      "main": [
+        [
+          {
+            "node": "Check Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
